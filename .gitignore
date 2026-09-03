@@ -1,0 +1,9 @@
+dist/
+.build/
+*.app
+.DS_Store
+*.swp
+.idea/
+*.xcuserstate
+*.xcworkspace
+xcuserdata/
