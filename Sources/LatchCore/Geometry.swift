@@ -126,6 +126,18 @@ public enum LayoutGeometry: Sendable {
         return (split.main, split.side)
     }
 
+    /// Map an AppKit window rect onto a SwiftUI canvas (top-left origin) for the desk map.
+    public static func project(_ rect: CGRect, from visible: CGRect, into canvas: CGRect) -> CGRect {
+        guard visible.width > 0, visible.height > 0 else { return .zero }
+        let clipped = rect.intersection(visible)
+        guard !clipped.isNull, clipped.area > 0 else { return .zero }
+        let sx = canvas.width / visible.width
+        let sy = canvas.height / visible.height
+        let x = canvas.minX + (clipped.minX - visible.minX) * sx
+        let y = canvas.minY + (visible.maxY - clipped.maxY) * sy
+        return CGRect(x: x, y: y, width: clipped.width * sx, height: clipped.height * sy)
+    }
+
     public static func splitMainSide(on visible: CGRect) -> (main: CGRect, side: CGRect) {
         let mainW = floor((visible.width - gap) * codingMainRatio)
         let sideW = max(visible.width - gap - mainW, 1)

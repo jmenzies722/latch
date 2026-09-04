@@ -2,6 +2,25 @@
 import AppKit
 import CoreGraphics
 
+extension DeskCensus {
+    init(tiles: [PreviewTile]) {
+        var roles: [WindowRole: String] = [:]
+        for tile in tiles {
+            if let role = tile.role, roles[role] == nil {
+                roles[role] = tile.name
+            }
+        }
+        self.init(windowCount: tiles.count, names: tiles.map(\.name), nameByRole: roles)
+    }
+}
+
+struct PreviewTile: Identifiable, Equatable {
+    var id: Int
+    var name: String
+    var role: WindowRole?
+    var frame: CGRect
+}
+
 struct LiveWindow {
     var element: AXUIElement
     var pid: pid_t
@@ -22,6 +41,71 @@ enum WindowEngine {
 
     static func pointerDisplay() -> DisplayBox? {
         LayoutGeometry.pointerDisplay(at: NSEvent.mouseLocation, in: displays())
+    }
+
+    static func display(id: Int) -> DisplayBox? {
+        displays().first { $0.id == id }
+    }
+
+    static func namedDisplays() -> [(box: DisplayBox, name: String)] {
+        NSScreen.screens.enumerated().map { index, screen in
+            (
+                DisplayBox(id: index, frame: screen.frame, visibleFrame: screen.visibleFrame),
+                screen.localizedName
+            )
+        }
+    }
+
+    static func previewOnPointerDisplay() -> (display: DisplayBox, tiles: [PreviewTile])? {
+        guard let display = pointerDisplay() else { return nil }
+        return (display, preview(on: display))
+    }
+
+    static func preview(on display: DisplayBox) -> [PreviewTile] {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let raw = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        let skip: Set<String> = [
+            "Window Server", "Dock", "SystemUIServer", "Control Center",
+            "Notification Center", "Latch", "Spotlight", "Wallpaper",
+            "CursorUIViewService", "Item-0",
+        ]
+        let all = displays()
+        var tiles: [PreviewTile] = []
+        for info in raw {
+            let layer = info[kCGWindowLayer as String] as? Int ?? -1
+            guard layer == 0 else { continue }
+            let owner = info[kCGWindowOwnerName as String] as? String ?? ""
+            if owner.isEmpty || skip.contains(owner) { continue }
+            guard let bounds = info[kCGWindowBounds as String] as? [String: Any],
+                  let x = bounds["X"] as? NSNumber,
+                  let y = bounds["Y"] as? NSNumber,
+                  let width = bounds["Width"] as? NSNumber,
+                  let height = bounds["Height"] as? NSNumber
+            else { continue }
+            let quartz = CGRect(x: x.doubleValue, y: y.doubleValue, width: width.doubleValue, height: height.doubleValue)
+            guard quartz.width >= 140, quartz.height >= 90 else { continue }
+            let frame = axToAppKit(quartz)
+            guard LayoutGeometry.isOnDisplay(frame, display: display, in: all) else { continue }
+            let number = info[kCGWindowNumber as String] as? Int ?? tiles.count
+            let bundle = bundleId(named: owner)
+            tiles.append(
+                PreviewTile(
+                    id: number,
+                    name: owner,
+                    role: bundle.flatMap(RoleCatalog.role),
+                    frame: frame
+                )
+            )
+        }
+        return tiles
+    }
+
+    private static func bundleId(named owner: String) -> String? {
+        NSWorkspace.shared.runningApplications.first {
+            $0.localizedName == owner
+        }?.bundleIdentifier
     }
 
     static func pointerScreen() -> NSScreen? {
@@ -82,6 +166,22 @@ enum WindowEngine {
 
     static func fitted(_ rect: CGRect) -> CGRect {
         LayoutGeometry.clampRestored(rect, displays: displays(), fallback: pointerDisplay())
+    }
+
+    static func readFrame(_ window: AXUIElement) -> CGRect? {
+        try? frame(of: window)
+    }
+
+    static func match(_ tile: PreviewTile, on displayId: Int) -> LiveWindow? {
+        guard let display = display(id: displayId) else { return nil }
+        let windows = visibleOnDisplay(display)
+        let overlap = windows.max { lhs, rhs in
+            lhs.frame.intersection(tile.frame).area < rhs.frame.intersection(tile.frame).area
+        }
+        if let overlap, overlap.frame.intersection(tile.frame).area > 80 {
+            return overlap
+        }
+        return windows.first { $0.appName == tile.name }
     }
 
     static func apply(_ rect: CGRect, to window: AXUIElement) {

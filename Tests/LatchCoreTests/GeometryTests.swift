@@ -98,6 +98,17 @@ final class GeometryTests: XCTestCase {
         XCTAssertTrue(LayoutGeometry.isOnDisplay(mostlyStudio, display: studio, in: [laptop, studio]))
     }
 
+    func testProjectFlipsAppKitYOntoSwiftUICanvas() {
+        let visible = CGRect(x: 0, y: 0, width: 1000, height: 500)
+        let canvas = CGRect(x: 0, y: 0, width: 200, height: 100)
+        let topLeft = CGRect(x: 0, y: 250, width: 500, height: 250)
+        let projected = LayoutGeometry.project(topLeft, from: visible, into: canvas)
+        XCTAssertEqual(projected.minX, 0, accuracy: 0.01)
+        XCTAssertEqual(projected.minY, 0, accuracy: 0.01)
+        XCTAssertEqual(projected.width, 100, accuracy: 0.01)
+        XCTAssertEqual(projected.height, 50, accuracy: 0.01)
+    }
+
     func testRestoredFrameMovesOntoFallbackWhenDisplayIsGone() {
         let laptop = DisplayBox(
             id: 0,
